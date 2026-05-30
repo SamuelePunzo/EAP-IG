@@ -347,7 +347,7 @@ def test_tiny_qwen_hook_values_match_between_hooked_transformer_and_bridge(
 
     assert hooked_values.keys() == bridge_values.keys()
     for name in _required_hook_names(hooked.cfg.n_layers):
-        torch.testing.assert_close(bridge_values[name], hooked_values[name], rtol=1e-4, atol=1e-3)
+        torch.testing.assert_close(bridge_values[name], hooked_values[name], rtol=1e-5, atol=1e-5)
 
 
 def test_tiny_qwen_capture_stage_matches_between_hooked_transformer_and_bridge(
@@ -371,13 +371,13 @@ def test_tiny_qwen_capture_stage_matches_between_hooked_transformer_and_bridge(
         "input_activations_corrupted",
         "input_activations_clean",
     ):
-        torch.testing.assert_close(bridge_state[key], hooked_state[key], rtol=1e-4, atol=1e-3)
+        torch.testing.assert_close(bridge_state[key], hooked_state[key], rtol=1e-5, atol=1e-5)
 
     torch.testing.assert_close(
         bridge_state["clean_logits"],
         hooked_state["clean_logits"],
-        rtol=1e-4,
-        atol=1e-2,
+        rtol=1e-5,
+        atol=1e-5,
     )
 
 
@@ -403,7 +403,7 @@ def test_tiny_qwen_plain_backward_hook_gradients_match_between_hooked_transforme
     )
     assert hooked_grads.keys() == bridge_grads.keys()
     for name in _required_hook_names(hooked.cfg.n_layers):
-        torch.testing.assert_close(bridge_grads[name], hooked_grads[name], rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(bridge_grads[name], hooked_grads[name], rtol=1e-5, atol=1e-5)
 
 
 def test_tiny_qwen_bridge_does_not_leak_backward_hooks_after_plain_backward(
@@ -452,4 +452,4 @@ def test_tiny_qwen_eap_ig_scores_match_between_hooked_transformer_and_bridge(
         quiet=True,
     )
 
-    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=1e-3, atol=1e-3)
+    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=1e-5, atol=1e-5)

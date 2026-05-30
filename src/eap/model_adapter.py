@@ -175,7 +175,7 @@ def get_model_dtype(model: Any) -> torch.dtype:
     return torch.float32
 
 
-def validate_model_for_eap(model: Any, *, allow_bridge_semantic_mismatch: bool = False) -> None:
+def validate_model_for_eap(model: Any) -> None:
     cfg = model.cfg
 
     required_flags = [
