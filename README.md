@@ -72,7 +72,7 @@ model = prepare_model_for_eap(bridge)
 graph = Graph.from_model(model)
 ```
 
-This mutates the bridge by calling `enable_compatibility_mode()` once by default, then enabling attention-result and split-Q/K/V hooks.
+This mutates the bridge by calling `enable_compatibility_mode()` once by default, then enabling attention-result, split-Q/K/V-input, and MLP-input hooks.
 
 Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The integration tests in this repo check parity against `HookedTransformer` for GPT-2, tiny Llama-family, tiny Qwen2-family, and tiny Gemma-family models.
 

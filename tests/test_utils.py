@@ -1,5 +1,8 @@
 import torch
-from transformer_lens.utils import get_attention_mask
+try:
+    from transformer_lens.utilities import get_attention_mask
+except ImportError:
+    from transformer_lens.utils import get_attention_mask
 
 from eap.utils import _attention_mask_from_tokens, tokenize_plus
 
