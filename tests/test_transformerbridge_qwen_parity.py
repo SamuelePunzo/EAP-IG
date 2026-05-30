@@ -1,6 +1,5 @@
 import copy
 import os
-from pathlib import Path
 
 import pytest
 import torch
@@ -9,6 +8,7 @@ from eap.attribute import attribute
 from eap.graph import Graph
 from eap.model_adapter import prepare_model_for_eap
 from eap.utils import make_hooks_and_matrices, tokenize_plus
+from conftest import hf_or_skip, tl_parity_device
 
 
 pytestmark = [
@@ -20,21 +20,11 @@ pytestmark = [
 ]
 
 QWEN_ROPE_BASE = 1000000.0
+QWEN_MODEL_NAME = "Qwen/Qwen2.5-7B"
 
 
 def _qwen_snapshot() -> str:
-    snapshot = (
-        Path.home()
-        / ".cache"
-        / "huggingface"
-        / "hub"
-        / "models--Qwen--Qwen2.5-7B"
-        / "snapshots"
-        / "d149729398750b98c0af14eb82c78cfe92750796"
-    )
-    if not snapshot.exists():
-        pytest.skip("Local Qwen2.5-7B tokenizer snapshot is unavailable.")
-    return str(snapshot)
+    return QWEN_MODEL_NAME
 
 
 def _metric(logits, clean_logits, input_lengths, label):
@@ -71,7 +61,12 @@ def _required_hook_names(n_layers: int) -> list[str]:
 
 def _make_tokenizer(snapshot: str):
     transformers = pytest.importorskip("transformers")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(snapshot, local_files_only=True)
+    tokenizer = hf_or_skip(
+        f"{snapshot} tokenizer",
+        transformers.AutoTokenizer.from_pretrained,
+        snapshot,
+        token=os.environ.get("HF_TOKEN"),
+    )
     tokenizer.padding_side = "right"
     if tokenizer.bos_token_id is None:
         tokenizer.bos_token = tokenizer.eos_token
@@ -110,6 +105,7 @@ def _make_base_state(tokenizer):
 def _load_hf_model_from_state(tokenizer, state_dict):
     model = _make_hf_model(tokenizer)
     model.load_state_dict(state_dict)
+    model.to(tl_parity_device())
     model.eval()
     return model
 
@@ -143,11 +139,11 @@ def _load_hooked_transformer(tokenizer, state_dict):
             "final_rms": True,
             "gated_mlp": True,
             "dtype": torch.float32,
-            "device": "cpu",
+            "device": tl_parity_device(),
             "n_devices": 1,
             "model_name": "tiny-qwen2-local",
             "original_architecture": "Qwen2ForCausalLM",
-            "tokenizer_name": _qwen_snapshot(),
+            "tokenizer_name": QWEN_MODEL_NAME,
             "default_prepend_bos": True,
             "init_weights": False,
         }
@@ -159,6 +155,7 @@ def _load_hooked_transformer(tokenizer, state_dict):
         move_to_device=False,
     )
     model.load_and_process_state_dict(processed_state)
+    model.to(tl_parity_device())
     model.cfg.use_attn_result = True
     model.cfg.use_split_qkv_input = True
     model.cfg.use_hook_mlp_in = True
@@ -174,11 +171,13 @@ def _load_transformer_bridge(tokenizer, state_dict):
         pytest.skip("TransformerBridge is unavailable in this TransformerLens install.")
 
     hf_model = _load_hf_model_from_state(tokenizer, state_dict)
-    bridge = TransformerBridge.boot_transformers(
-        "Qwen/Qwen2.5-7B",
+    bridge = hf_or_skip(
+        f"{QWEN_MODEL_NAME} TransformerBridge",
+        TransformerBridge.boot_transformers,
+        QWEN_MODEL_NAME,
         hf_model=hf_model,
         tokenizer=copy.deepcopy(tokenizer),
-        device="cpu",
+        device=tl_parity_device(),
     )
     bridge = prepare_model_for_eap(bridge)
     bridge.eval()
@@ -197,6 +196,9 @@ def _capture_tokenization(model, inputs):
 
 def _capture_hook_values(model, tokens, attention_mask):
     values = {}
+    device = next(model.parameters()).device
+    tokens = tokens.to(device)
+    attention_mask = attention_mask.to(device)
 
     def make_hook(name):
         def hook_fn(activations, hook):

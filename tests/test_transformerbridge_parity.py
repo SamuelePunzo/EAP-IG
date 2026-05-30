@@ -6,6 +6,7 @@ import torch
 from eap.attribute import attribute
 from eap.graph import Graph
 from eap.model_adapter import prepare_model_for_eap
+from conftest import hf_or_skip, tl_parity_device
 
 
 pytestmark = [
@@ -35,7 +36,12 @@ def _load_hooked_transformer():
     if hooked_cls is None:
         pytest.skip("HookedTransformer is unavailable in this TransformerLens install.")
 
-    model = hooked_cls.from_pretrained("gpt2", device="cpu")
+    model = hf_or_skip(
+        "GPT-2 HookedTransformer",
+        hooked_cls.from_pretrained,
+        "gpt2",
+        device=tl_parity_device(),
+    )
     model.cfg.use_attn_result = True
     model.cfg.use_split_qkv_input = True
     model.cfg.use_hook_mlp_in = True
@@ -49,7 +55,12 @@ def _load_transformer_bridge():
     except ImportError:
         pytest.skip("TransformerBridge is unavailable in this TransformerLens install.")
 
-    bridge = TransformerBridge.boot_transformers("gpt2", device="cpu")
+    bridge = hf_or_skip(
+        "GPT-2 TransformerBridge",
+        TransformerBridge.boot_transformers,
+        "gpt2",
+        device=tl_parity_device(),
+    )
     return prepare_model_for_eap(bridge)
 
 
