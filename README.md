@@ -74,7 +74,7 @@ graph = Graph.from_model(model)
 
 This mutates the bridge by calling `enable_compatibility_mode()` once by default, then enabling attention-result and split-Q/K/V hooks.
 
-Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The integration tests in this repo check parity against `HookedTransformer` for GPT-2, a tiny Llama-family model, and a tiny Qwen2-family model.
+Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The integration tests in this repo check parity against `HookedTransformer` for GPT-2, tiny Llama-family, tiny Qwen2-family, and tiny Gemma-family models.
 
 TransformerBridge support is intentionally scoped to decoder-only transformer blocks with one attention and one MLP component per layer; SSM, multimodal, encoder-only, and encoder-decoder models are out of scope for v1.
 
