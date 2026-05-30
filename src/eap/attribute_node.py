@@ -395,16 +395,13 @@ def attribute_node(model: HookedTransformer, graph: Graph, dataloader: DataLoade
                    intervention: Literal['patching', 'zero', 'mean','mean-positional']='patching', 
                    aggregation='sum', ig_steps: Optional[int]=None, intervention_dataloader: Optional[DataLoader]=None, 
                    quiet:bool=False, neuron:bool=False, auto_enable_bridge_compat: bool=True,
-                   bridge_compat_kwargs: Optional[dict]=None, allow_bridge_semantic_mismatch: bool=False):
+                   bridge_compat_kwargs: Optional[dict]=None):
     model = prepare_model_for_eap(
         model,
         auto_enable_bridge_compat=auto_enable_bridge_compat,
         compatibility_mode_kwargs=bridge_compat_kwargs,
     )
-    validate_model_for_eap(
-        model,
-        allow_bridge_semantic_mismatch=allow_bridge_semantic_mismatch,
-    )
+    validate_model_for_eap(model)
     
     if aggregation not in allowed_aggregations:
         raise ValueError(f'aggregation must be in {allowed_aggregations}, but got {aggregation}')

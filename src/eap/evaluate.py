@@ -17,8 +17,8 @@ def evaluate_graph(model: HookedTransformer, graph: Graph, dataloader: DataLoade
                    metrics: Union[Callable[[Tensor],Tensor], List[Callable[[Tensor], Tensor]]], 
                    quiet=False, intervention: Literal['patching', 'zero', 'mean','mean-positional']='patching', 
                    intervention_dataloader: Optional[DataLoader]=None, skip_clean:bool=True,
-                   auto_enable_bridge_compat: bool=True, bridge_compat_kwargs: Optional[dict]=None,
-                   allow_bridge_semantic_mismatch: bool=False) -> Union[torch.Tensor, List[torch.Tensor]]:
+                   auto_enable_bridge_compat: bool=True,
+                   bridge_compat_kwargs: Optional[dict]=None) -> Union[torch.Tensor, List[torch.Tensor]]:
     """Evaluate a circuit (i.e. a graph where only some nodes are false, probably created by calling graph.apply_threshold). You probably want to prune 
         beforehand to make sure your circuit is valid.
 
@@ -41,10 +41,7 @@ def evaluate_graph(model: HookedTransformer, graph: Graph, dataloader: DataLoade
         auto_enable_bridge_compat=auto_enable_bridge_compat,
         compatibility_mode_kwargs=bridge_compat_kwargs,
     )
-    validate_model_for_eap(
-        model,
-        allow_bridge_semantic_mismatch=allow_bridge_semantic_mismatch,
-    )
+    validate_model_for_eap(model)
         
     assert intervention in ['patching', 'zero', 'mean', 'mean-positional'], f"Invalid intervention: {intervention}"
     
