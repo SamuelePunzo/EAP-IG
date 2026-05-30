@@ -14,7 +14,13 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["pygraphviz>=1.14"]
+test = ["pytest>=8.0"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that load real external model implementations",
+]
