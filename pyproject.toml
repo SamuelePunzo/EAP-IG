@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "matplotlib>=3.10.1",
-    "transformer-lens>=2.15.0",
+    "transformer-lens>=3.3.0",
 ]
 
 [project.optional-dependencies]
@@ -23,4 +23,8 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 markers = [
     "integration: tests that load real external model implementations",
+    "model_audit_smoke: fast model-audit smoke tests",
+    "model_audit_certification: slower model-audit certification tests",
+    "model_audit_math: mathematical validation tests for model-audit coverage",
+    "slow: intentionally slower validation tests",
 ]

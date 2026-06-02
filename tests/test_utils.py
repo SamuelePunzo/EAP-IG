@@ -4,12 +4,22 @@ try:
 except ImportError:
     from transformer_lens.utils import get_attention_mask
 
-from eap.utils import _attention_mask_from_tokens, tokenize_plus
+from eap.utils import _attention_mask_from_tokens, _maybe_expand_grouped_query_tensor, tokenize_plus
 
 
 class DummyCfg:
-    def __init__(self, n_ctx=16):
+    def __init__(
+        self,
+        n_ctx=16,
+        *,
+        n_heads=None,
+        n_key_value_heads=None,
+        ungroup_grouped_query_attention=False,
+    ):
         self.n_ctx = n_ctx
+        self.n_heads = n_heads
+        self.n_key_value_heads = n_key_value_heads
+        self.ungroup_grouped_query_attention = ungroup_grouped_query_attention
 
 
 class DummyTokenizer:
@@ -223,3 +233,28 @@ def test_tokenize_plus_respects_max_length_and_restores_context():
     torch.testing.assert_close(attention_mask, get_attention_mask(model.tokenizer, tokens, True))
     torch.testing.assert_close(input_lengths, torch.tensor([2, 3]))
     assert n_pos == 3
+
+
+def test_expand_grouped_query_tensor_repeats_kv_heads_when_bridge_is_ungrouped():
+    model = DummyModel(
+        DummyTokenizer(
+            pad_token_id=0,
+            bos_token_id=99,
+            eos_token_id=99,
+            padding_side="right",
+        )
+    )
+    model.cfg = DummyCfg(
+        n_heads=4,
+        n_key_value_heads=2,
+        ungroup_grouped_query_attention=True,
+    )
+    tensor = torch.arange(1 * 2 * 2 * 3, dtype=torch.float32).reshape(1, 2, 2, 3)
+
+    expanded = _maybe_expand_grouped_query_tensor(model, tensor)
+
+    assert expanded.shape == (1, 2, 4, 3)
+    torch.testing.assert_close(expanded[:, :, 0], tensor[:, :, 0])
+    torch.testing.assert_close(expanded[:, :, 1], tensor[:, :, 0])
+    torch.testing.assert_close(expanded[:, :, 2], tensor[:, :, 1])
+    torch.testing.assert_close(expanded[:, :, 3], tensor[:, :, 1])

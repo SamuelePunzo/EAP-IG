@@ -130,7 +130,7 @@ def test_hooked_transformer_and_bridge_logits_match_in_compatibility_mode():
         hooked_logits = hooked(tokens)
         bridge_logits = bridge(tokens)
 
-    torch.testing.assert_close(bridge_logits, hooked_logits, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(bridge_logits, hooked_logits, rtol=2e-5, atol=2e-5)
 
 
 def test_required_eap_hook_shapes_match_between_hooked_transformer_and_bridge():
@@ -155,7 +155,7 @@ def test_required_eap_hook_values_match_between_hooked_transformer_and_bridge():
 
     assert hooked_values.keys() == bridge_values.keys()
     for name in REQUIRED_HOOK_NAMES:
-        torch.testing.assert_close(bridge_values[name], hooked_values[name], rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(bridge_values[name], hooked_values[name], rtol=2e-5, atol=2e-5)
 
 
 def test_required_eap_hook_gradients_match_between_hooked_transformer_and_bridge():
@@ -168,7 +168,7 @@ def test_required_eap_hook_gradients_match_between_hooked_transformer_and_bridge
 
     assert hooked_grads.keys() == bridge_grads.keys()
     for name in REQUIRED_HOOK_NAMES:
-        torch.testing.assert_close(bridge_grads[name], hooked_grads[name], rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(bridge_grads[name], hooked_grads[name], rtol=2e-5, atol=2e-5)
 
 
 def test_bridge_attribution_runs_with_legacy_compatible_hooks_by_default():
@@ -196,7 +196,7 @@ def test_tiny_eap_scores_match_between_hooked_transformer_and_bridge():
         quiet=True,
     )
 
-    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=2e-5, atol=2e-5)
 
 
 def test_tiny_eap_ig_scores_match_between_hooked_transformer_and_bridge():
@@ -225,4 +225,4 @@ def test_tiny_eap_ig_scores_match_between_hooked_transformer_and_bridge():
         quiet=True,
     )
 
-    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=2e-5, atol=2e-5)

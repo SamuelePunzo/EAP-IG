@@ -6,7 +6,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from einops import einsum
 
-from .utils import tokenize_plus, make_hooks_and_matrices, compute_mean_activations
+from .utils import (
+    _maybe_contract_grouped_query_tensor,
+    tokenize_plus,
+    make_hooks_and_matrices,
+    compute_mean_activations,
+)
 from .graph import Graph, AttentionNode
 from .model_adapter import get_model_device, prepare_model_for_eap, validate_model_for_eap
 
@@ -157,6 +162,12 @@ def evaluate_graph(model: HookedTransformer, graph: Graph, dataloader: DataLoade
                 else:
                     update = einsum(activation_differences[:, :, :len(in_graph_vector)], in_graph_vector,
                                     'batch pos previous hidden, previous ... -> batch pos ... hidden')
+            if (
+                activations.ndim >= 4
+                and update.ndim >= 4
+                and activations.shape[2] != update.shape[2]
+            ):
+                update = _maybe_contract_grouped_query_tensor(model, update)
             activations += update
             return activations
         return input_construction_hook

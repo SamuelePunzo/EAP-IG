@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from eap.model_adapter import EAPModelAdapter, prepare_model_for_eap, validate_model_for_eap
@@ -14,7 +15,7 @@ class HookContext:
 
 
 class FakeBridge:
-    def __init__(self):
+    def __init__(self, *, n_key_value_heads=None, ungroup_grouped_query_attention=False):
         self.cfg = SimpleNamespace(
             device="cpu",
             dtype=torch.float32,
@@ -23,7 +24,8 @@ class FakeBridge:
             use_split_qkv_input=False,
             use_hook_mlp_in=False,
             n_heads=2,
-            n_key_value_heads=None,
+            n_key_value_heads=n_key_value_heads,
+            ungroup_grouped_query_attention=ungroup_grouped_query_attention,
         )
         self.tokenizer = SimpleNamespace(pad_token_id=0)
         self.hook_aliases = {}
@@ -103,3 +105,30 @@ def test_validate_accepts_prepared_bridge_by_default():
     adapter = prepare_model_for_eap(bridge)
 
     validate_model_for_eap(adapter)
+
+
+def test_prepare_bridge_auto_ungroups_grouped_query_attention():
+    bridge = FakeBridge(n_key_value_heads=1, ungroup_grouped_query_attention=False)
+
+    adapter = prepare_model_for_eap(bridge)
+
+    assert isinstance(adapter, EAPModelAdapter)
+    assert bridge.cfg.ungroup_grouped_query_attention is True
+    validate_model_for_eap(adapter)
+
+
+class FakeUnsupportedAttentionBridge(FakeBridge):
+    def set_use_attn_result(self, value):
+        raise NotImplementedError("use_attn_result: unsupported attention fork")
+
+    def set_use_split_qkv_input(self, value):
+        raise NotImplementedError("use_split_qkv_input: unsupported attention fork")
+
+
+def test_validate_rejects_bridge_without_required_attention_fork():
+    bridge = FakeUnsupportedAttentionBridge()
+
+    adapter = prepare_model_for_eap(bridge)
+
+    with pytest.raises(NotImplementedError, match="hook surface required for EAP"):
+        validate_model_for_eap(adapter)

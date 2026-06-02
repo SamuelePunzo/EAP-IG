@@ -9,9 +9,59 @@ from torch.utils.data import DataLoader
 from einops import einsum
 
 from .graph import Graph, AttentionNode, LogitNode
-from .model_adapter import get_model_device, prepare_model_for_eap
+from .model_adapter import cfg_get, get_model_device, prepare_model_for_eap
 
 HookedTransformer = Any
+
+
+def _maybe_expand_grouped_query_tensor(model: HookedTransformer, tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.ndim < 4:
+        return tensor
+
+    cfg = getattr(model, "cfg", None)
+    if cfg is None or not cfg_get(cfg, "ungroup_grouped_query_attention", False):
+        return tensor
+
+    n_heads = cfg_get(cfg, "n_heads", None)
+    n_key_value_heads = cfg_get(cfg, "n_key_value_heads", None)
+    if (
+        n_heads is None
+        or n_key_value_heads is None
+        or n_key_value_heads == n_heads
+        or tensor.size(2) != n_key_value_heads
+        or n_heads % n_key_value_heads != 0
+    ):
+        return tensor
+
+    return tensor.repeat_interleave(n_heads // n_key_value_heads, dim=2)
+
+
+def _maybe_contract_grouped_query_tensor(model: HookedTransformer, tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.ndim < 4:
+        return tensor
+
+    cfg = getattr(model, "cfg", None)
+    if cfg is None or not cfg_get(cfg, "ungroup_grouped_query_attention", False):
+        return tensor
+
+    n_heads = cfg_get(cfg, "n_heads", None)
+    n_key_value_heads = cfg_get(cfg, "n_key_value_heads", None)
+    if (
+        n_heads is None
+        or n_key_value_heads is None
+        or n_key_value_heads == n_heads
+        or tensor.size(2) != n_heads
+        or n_heads % n_key_value_heads != 0
+    ):
+        return tensor
+
+    grouped_shape = (
+        *tensor.shape[:2],
+        n_key_value_heads,
+        n_heads // n_key_value_heads,
+        *tensor.shape[3:],
+    )
+    return tensor.reshape(grouped_shape).mean(dim=3)
 
 
 def _get_pad_token_id(tokenizer: Any) -> Optional[int]:
@@ -153,6 +203,7 @@ def make_hooks_and_matrices(model: HookedTransformer, graph: Graph, batch_size:i
         """
         grads = gradients.detach()
         try:
+            grads = _maybe_expand_grouped_query_tensor(model, grads)
             if grads.ndim == 3:
                 grads = grads.unsqueeze(2)
             s = einsum(activation_difference[:, :, :prev_index], grads,'batch pos forward hidden, batch pos backward hidden -> forward backward')

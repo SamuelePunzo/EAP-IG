@@ -7,6 +7,7 @@ import torch
 
 _EAP_PREPARED_FLAG = "_eap_prepared_for_compatibility"
 _EAP_COMPAT_FLAG = "_eap_enabled_bridge_compatibility"
+_EAP_UNSUPPORTED_FEATURES = "_eap_unsupported_bridge_features"
 _MISSING = object()
 
 
@@ -91,6 +92,22 @@ def is_bridge_like(model: Any) -> bool:
     )
 
 
+def _unsupported_bridge_features(model: Any) -> dict[str, str]:
+    unsupported = getattr(model, _EAP_UNSUPPORTED_FEATURES, None)
+    if unsupported is None:
+        unsupported = {}
+        setattr(model, _EAP_UNSUPPORTED_FEATURES, unsupported)
+    return unsupported
+
+
+def _feature_name_from_setter(method_name: str) -> str:
+    return method_name[len("set_") :] if method_name.startswith("set_") else method_name
+
+
+def _feature_is_unsupported(model: Any, feature_name: str) -> bool:
+    return feature_name in _unsupported_bridge_features(model)
+
+
 def _bridge_compatibility_enabled(model: Any) -> bool:
     return bool(
         getattr(model, _EAP_COMPAT_FLAG, False)
@@ -103,7 +120,11 @@ def _call_if_present(model: Any, method_name: str, *args: Any, **kwargs: Any) ->
     method = getattr(model, method_name, None)
     if method is None:
         return False
-    method(*args, **kwargs)
+    try:
+        method(*args, **kwargs)
+    except NotImplementedError as exc:
+        _unsupported_bridge_features(model)[_feature_name_from_setter(method_name)] = str(exc)
+        return False
     return True
 
 
@@ -114,14 +135,38 @@ def _configure_bridge_hooks(model: Any) -> None:
         if cfg_get(cfg, "use_attn_in", False):
             cfg_set(cfg, "use_attn_in", False)
 
-    if not _call_if_present(model, "set_use_attn_result", True) and cfg is not None:
+    if (
+        not _call_if_present(model, "set_use_attn_result", True)
+        and cfg is not None
+        and not _feature_is_unsupported(model, "use_attn_result")
+    ):
         cfg_set(cfg, "use_attn_result", True)
 
-    if not _call_if_present(model, "set_use_split_qkv_input", True) and cfg is not None:
+    if (
+        not _call_if_present(model, "set_use_split_qkv_input", True)
+        and cfg is not None
+        and not _feature_is_unsupported(model, "use_split_qkv_input")
+    ):
         cfg_set(cfg, "use_split_qkv_input", True)
 
-    if not _call_if_present(model, "set_use_hook_mlp_in", True) and cfg is not None:
+    if (
+        not _call_if_present(model, "set_use_hook_mlp_in", True)
+        and cfg is not None
+        and not _feature_is_unsupported(model, "use_hook_mlp_in")
+    ):
         cfg_set(cfg, "use_hook_mlp_in", True)
+
+    if cfg is not None:
+        n_heads = cfg_get(cfg, "n_heads", None)
+        n_key_value_heads = cfg_get(cfg, "n_key_value_heads", None)
+        if (
+            n_heads is not None
+            and n_key_value_heads is not None
+            and n_key_value_heads != n_heads
+            and not cfg_get(cfg, "ungroup_grouped_query_attention", False)
+        ):
+            if not _call_if_present(model, "set_ungroup_grouped_query_attention", True):
+                cfg_set(cfg, "ungroup_grouped_query_attention", True)
 
 
 def prepare_model_for_eap(
@@ -177,8 +222,22 @@ def get_model_dtype(model: Any) -> torch.dtype:
     return torch.float32
 
 
+def get_score_accumulation_dtype(model: Any) -> torch.dtype:
+    dtype = get_model_dtype(model)
+    if dtype in (torch.float16, torch.bfloat16):
+        return torch.float32
+    return dtype
+
+
 def validate_model_for_eap(model: Any) -> None:
     cfg = model.cfg
+    unsupported = getattr(model, _EAP_UNSUPPORTED_FEATURES, None) or {}
+    if unsupported:
+        details = "; ".join(f"{name}: {message}" for name, message in unsupported.items())
+        raise NotImplementedError(
+            "Model bridge does not expose the hook surface required for EAP. "
+            f"{details}"
+        )
 
     required_flags = [
         ("use_attn_result", "Model must be configured to use attention result"),
