@@ -116,6 +116,13 @@ def _bridge_compatibility_enabled(model: Any) -> bool:
     )
 
 
+def _bridge_has_legacy_eap_hook_semantics(model: Any) -> bool:
+    return bool(
+        hasattr(model, "set_use_hook_mlp_in")
+        and hasattr(model, "set_use_split_qkv_input")
+    )
+
+
 def _call_if_present(model: Any, method_name: str, *args: Any, **kwargs: Any) -> bool:
     method = getattr(model, method_name, None)
     if method is None:
@@ -249,6 +256,13 @@ def validate_model_for_eap(model: Any) -> None:
         for flag, message in required_flags
         if hasattr(cfg, flag) and not cfg_get(cfg, flag)
     ]
+
+    if is_bridge_like(model) and not _bridge_has_legacy_eap_hook_semantics(model):
+        missing.append(
+            "TransformerBridge attribution/evaluation requires a TransformerLens "
+            "build with legacy-compatible EAP hook semantics; upgrade "
+            "transformer-lens to >=3.5.1"
+        )
 
     n_heads = cfg_get(cfg, "n_heads", None)
     n_key_value_heads = cfg_get(cfg, "n_key_value_heads", None)

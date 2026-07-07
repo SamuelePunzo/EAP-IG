@@ -67,8 +67,18 @@ class FakeBridge:
         return tokens + 1
 
 
+class CompatibleFakeBridge(FakeBridge):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.hook_mlp_in_calls = []
+
+    def set_use_hook_mlp_in(self, value):
+        self.hook_mlp_in_calls.append(value)
+        self.cfg.use_hook_mlp_in = value
+
+
 def test_prepare_bridge_enables_compatibility_and_required_hooks_once():
-    bridge = FakeBridge()
+    bridge = CompatibleFakeBridge()
 
     adapter = prepare_model_for_eap(
         bridge,
@@ -82,6 +92,7 @@ def test_prepare_bridge_enables_compatibility_and_required_hooks_once():
     assert bridge.attn_in_calls == [False]
     assert bridge.attn_result_calls == [True]
     assert bridge.split_qkv_calls == [True]
+    assert bridge.hook_mlp_in_calls == [True]
     assert bridge.cfg.use_attn_in is False
     assert bridge.cfg.use_attn_result is True
     assert bridge.cfg.use_split_qkv_input is True
@@ -101,14 +112,22 @@ def test_adapter_delegates_model_surface():
 
 
 def test_validate_accepts_prepared_bridge_by_default():
-    bridge = FakeBridge()
+    bridge = CompatibleFakeBridge()
     adapter = prepare_model_for_eap(bridge)
 
     validate_model_for_eap(adapter)
 
 
+def test_validate_rejects_bridge_without_legacy_hook_capability_by_default():
+    bridge = FakeBridge()
+    adapter = prepare_model_for_eap(bridge)
+
+    with pytest.raises(AssertionError, match="legacy-compatible EAP hook semantics"):
+        validate_model_for_eap(adapter)
+
+
 def test_prepare_bridge_auto_ungroups_grouped_query_attention():
-    bridge = FakeBridge(n_key_value_heads=1, ungroup_grouped_query_attention=False)
+    bridge = CompatibleFakeBridge(n_key_value_heads=1, ungroup_grouped_query_attention=False)
 
     adapter = prepare_model_for_eap(bridge)
 
@@ -117,7 +136,7 @@ def test_prepare_bridge_auto_ungroups_grouped_query_attention():
     validate_model_for_eap(adapter)
 
 
-class FakeUnsupportedAttentionBridge(FakeBridge):
+class FakeUnsupportedAttentionBridge(CompatibleFakeBridge):
     def set_use_attn_result(self, value):
         raise NotImplementedError("use_attn_result: unsupported attention fork")
 

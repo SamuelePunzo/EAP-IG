@@ -175,7 +175,14 @@ def test_bridge_attribution_runs_with_legacy_compatible_hooks_by_default():
     bridge = _load_transformer_bridge()
     bridge_graph = Graph.from_model(bridge)
 
-    attribute(bridge, bridge_graph, _tiny_dataloader(), _metric, method="EAP", quiet=True)
+    attribute(
+        bridge,
+        bridge_graph,
+        _tiny_dataloader(),
+        _metric,
+        method="EAP",
+        quiet=True,
+    )
     assert bridge_graph.scores.shape == (bridge_graph.n_forward, bridge_graph.n_backward)
 
 

@@ -74,7 +74,9 @@ graph = Graph.from_model(model)
 
 This mutates the bridge by calling `enable_compatibility_mode()` once by default, then enabling attention-result, split-Q/K/V-input, and MLP-input hooks. For grouped-query attention models, it also sets `model.cfg.ungroup_grouped_query_attention = True` so EAP can build the legacy-equivalent head-level graph.
 
-Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The integration tests in this repo check parity against `HookedTransformer` for GPT-2, tiny Llama-family, tiny Qwen2-family, and tiny Gemma-family models.
+Bridge attribution/evaluation requires a TransformerLens build with legacy-compatible EAP hook semantics, such as `transformer-lens>=3.5.1`. Older bridge builds fail closed by default with an upgrade message.
+
+Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The opt-in integration tests in this repo check parity against `HookedTransformer` for GPT-2, tiny Llama-family, tiny Qwen2-family, and tiny Gemma-family models.
 
 TransformerBridge support is intentionally scoped to decoder-only transformer blocks with one attention and one MLP component per layer; SSM, multimodal, encoder-only, and encoder-decoder models are out of scope for v1.
 
