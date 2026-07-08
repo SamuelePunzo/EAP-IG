@@ -8,6 +8,8 @@ import torch
 _EAP_PREPARED_FLAG = "_eap_prepared_for_compatibility"
 _EAP_COMPAT_FLAG = "_eap_enabled_bridge_compatibility"
 _EAP_UNSUPPORTED_FEATURES = "_eap_unsupported_bridge_features"
+_EAP_MATERIALIZED_GQA_FLAG = "_eap_materialized_ungrouped_gqa"
+_EAP_ORIGINAL_N_KEY_VALUE_HEADS = "_eap_original_n_key_value_heads"
 _MISSING = object()
 
 
@@ -135,6 +137,117 @@ def _call_if_present(model: Any, method_name: str, *args: Any, **kwargs: Any) ->
     return True
 
 
+def _repeat_linear_output_heads(
+    linear: torch.nn.Linear,
+    *,
+    n_heads: int,
+    n_key_value_heads: int,
+    d_head: int,
+) -> torch.nn.Linear:
+    expected_output_features = n_key_value_heads * d_head
+    if linear.out_features == n_heads * d_head:
+        return linear
+    if linear.out_features != expected_output_features:
+        raise NotImplementedError(
+            "K/V projection output width does not match n_key_value_heads * d_head"
+        )
+
+    repeat = n_heads // n_key_value_heads
+    replacement = torch.nn.Linear(
+        linear.in_features,
+        n_heads * d_head,
+        bias=linear.bias is not None,
+        device=linear.weight.device,
+        dtype=linear.weight.dtype,
+    )
+    replacement.training = linear.training
+    replacement.weight.requires_grad = linear.weight.requires_grad
+    with torch.no_grad():
+        weight = linear.weight.reshape(n_key_value_heads, d_head, linear.in_features)
+        replacement.weight.copy_(
+            weight.repeat_interleave(repeat, dim=0).reshape(n_heads * d_head, linear.in_features)
+        )
+        if linear.bias is not None and replacement.bias is not None:
+            replacement.bias.requires_grad = linear.bias.requires_grad
+            bias = linear.bias.reshape(n_key_value_heads, d_head)
+            replacement.bias.copy_(bias.repeat_interleave(repeat, dim=0).reshape(n_heads * d_head))
+    return replacement
+
+
+def _materialize_bridge_gqa_ungroup(
+    model: Any,
+    cfg: Any,
+    *,
+    n_heads: int,
+    n_key_value_heads: int,
+) -> None:
+    if getattr(model, _EAP_MATERIALIZED_GQA_FLAG, False):
+        return
+    if n_heads % n_key_value_heads != 0:
+        _unsupported_bridge_features(model)["ungroup_grouped_query_attention"] = (
+            "n_heads must be divisible by n_key_value_heads to materialize ungrouped GQA"
+        )
+        return
+
+    blocks = getattr(model, "blocks", None)
+    if blocks is None:
+        return
+
+    d_head = cfg_get(cfg, "d_head", None)
+    if d_head is None:
+        d_model = cfg_get(cfg, "d_model", None)
+        if d_model is None or d_model % n_heads != 0:
+            _unsupported_bridge_features(model)["ungroup_grouped_query_attention"] = (
+                "Cannot infer d_head needed to materialize ungrouped GQA"
+            )
+            return
+        d_head = d_model // n_heads
+    d_head = int(d_head)
+
+    materialized_any = False
+    for block in blocks:
+        attn = getattr(block, "attn", None)
+        if attn is None:
+            continue
+
+        for projection_name in ("k", "v"):
+            projection = getattr(attn, projection_name, None)
+            original = getattr(projection, "original_component", None)
+            if original is None or not isinstance(original, torch.nn.Linear):
+                _unsupported_bridge_features(model)["ungroup_grouped_query_attention"] = (
+                    "Bridge K/V projection is not a materializable torch.nn.Linear"
+                )
+                return
+            projection.set_original_component(
+                _repeat_linear_output_heads(
+                    original,
+                    n_heads=n_heads,
+                    n_key_value_heads=n_key_value_heads,
+                    d_head=d_head,
+                )
+            )
+            materialized_any = True
+
+        hf_attn = getattr(attn, "original_component", None)
+        attn_config = getattr(attn, "config", None)
+        if attn_config is not None:
+            cfg_set(attn_config, "n_key_value_heads", n_heads)
+        if hf_attn is not None:
+            if hasattr(hf_attn, "num_key_value_groups"):
+                setattr(hf_attn, "num_key_value_groups", 1)
+            for attr_name in ("num_key_value_heads", "num_kv_heads", "n_kv_heads"):
+                if hasattr(hf_attn, attr_name):
+                    setattr(hf_attn, attr_name, n_heads)
+            hf_config = getattr(hf_attn, "config", None)
+            if hf_config is not None and hasattr(hf_config, "num_key_value_heads"):
+                setattr(hf_config, "num_key_value_heads", n_heads)
+
+    if materialized_any:
+        setattr(model, _EAP_MATERIALIZED_GQA_FLAG, True)
+        setattr(model, _EAP_ORIGINAL_N_KEY_VALUE_HEADS, n_key_value_heads)
+        cfg_set(cfg, "n_key_value_heads", n_heads)
+
+
 def _configure_bridge_hooks(model: Any) -> None:
     cfg = getattr(model, "cfg", None)
     if cfg is not None and cfg_get(cfg, "use_attn_in", False):
@@ -170,10 +283,18 @@ def _configure_bridge_hooks(model: Any) -> None:
             n_heads is not None
             and n_key_value_heads is not None
             and n_key_value_heads != n_heads
-            and not cfg_get(cfg, "ungroup_grouped_query_attention", False)
         ):
-            if not _call_if_present(model, "set_ungroup_grouped_query_attention", True):
+            if (
+                not cfg_get(cfg, "ungroup_grouped_query_attention", False)
+                and not _call_if_present(model, "set_ungroup_grouped_query_attention", True)
+            ):
                 cfg_set(cfg, "ungroup_grouped_query_attention", True)
+            _materialize_bridge_gqa_ungroup(
+                model,
+                cfg,
+                n_heads=int(n_heads),
+                n_key_value_heads=int(n_key_value_heads),
+            )
 
 
 def prepare_model_for_eap(

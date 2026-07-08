@@ -5,7 +5,7 @@ import torch
 
 from eap.attribute import attribute
 from eap.evaluate import evaluate_baseline, evaluate_graph
-from eap.graph import AttentionNode, Graph
+from eap.graph import Graph
 from eap.utils import _maybe_expand_grouped_query_tensor, tokenize_plus
 from model_audit_helpers import (
     load_bridge_model,
@@ -26,11 +26,7 @@ pytestmark = [
 
 MATH_CASES = tuple(case for case in SMOKE_CASES if case.family in {"gpt2", "llama", "qwen", "gemma", "mistral"})
 GQA_CASES = tuple(case for case in MATH_CASES if "gqa" in case.expected_caveats)
-# Exact edge patching is only a clean reference when each logical attention head maps
-# to an independently patchable hook surface. Grouped-query families share K/V heads,
-# so exact interventions there are not a faithful per-edge gold standard.
-FAITHFULNESS_CASES = tuple(case for case in MATH_CASES if "gqa" not in case.expected_caveats)
-GROUPED_FAITHFULNESS_CASES = GQA_CASES
+FAITHFULNESS_CASES = MATH_CASES
 
 
 def _single_batch(clean: str = "The cat sat on the mat", corrupted: str = "The dog sat on the mat"):
@@ -76,26 +72,6 @@ def _spearman_rank_correlation(x: torch.Tensor, y: torch.Tensor) -> float:
 
 def _sign_agreement(x: torch.Tensor, y: torch.Tensor) -> float:
     return x.sign().eq(y.sign()).float().mean().item()
-
-
-def _grouped_kv_edge_groups(graph: Graph):
-    n_heads = graph.cfg["n_heads"]
-    n_key_value_heads = graph.cfg.get("n_key_value_heads", n_heads)
-    if n_key_value_heads == n_heads:
-        return {}
-
-    group_size = n_heads // n_key_value_heads
-    groups = {}
-    for edge_name, edge in graph.edges.items():
-        if edge.qkv not in {"k", "v"} or not isinstance(edge.child, AttentionNode):
-            continue
-        kv_group = edge.child.head // group_size
-        key = (edge.parent.name, edge.child.layer, edge.qkv, kv_group)
-        groups.setdefault(key, []).append(edge_name)
-
-    for edge_names in groups.values():
-        edge_names.sort(key=lambda name: graph.edges[name].child.head)
-    return groups
 
 
 @pytest.mark.parametrize("case", select_cases(MATH_CASES), ids=lambda case: case.case_id)
@@ -215,10 +191,10 @@ def test_gqa_gradient_broadcast(case):
 
 
 @pytest.mark.parametrize("case", select_cases(GQA_CASES), ids=lambda case: case.case_id)
-def test_gqa_duplicate_kv_scores_are_group_consistent(case):
+def test_gqa_bridge_kv_inputs_are_ungrouped_for_eap(case):
     require_enabled(
         "EAP_RUN_MODEL_AUDIT_SMOKE",
-        "Set EAP_RUN_MODEL_AUDIT_SMOKE=1 to run GQA grouped-equivalence validation tests.",
+        "Set EAP_RUN_MODEL_AUDIT_SMOKE=1 to run GQA hook ungrouping validation tests.",
     )
     require_case_access(case)
     device = resolve_device(case, default="cpu")
@@ -226,23 +202,32 @@ def test_gqa_duplicate_kv_scores_are_group_consistent(case):
     model = load_bridge_model(case, device=device)
     validate_prepared_model(model, case)
 
-    graph = Graph.from_model(model)
-    attribute(
-        model,
-        graph,
-        _single_batch(),
-        metric,
-        method="EAP-IG-inputs",
-        ig_steps=8,
-        quiet=True,
-    )
+    assert model.cfg.ungroup_grouped_query_attention is True
+    assert model.cfg.n_key_value_heads == model.cfg.n_heads
 
-    groups = _grouped_kv_edge_groups(graph)
-    assert groups, "Expected grouped K/V edge groups for this GQA model."
-    for edge_names in groups.values():
-        values = torch.tensor([graph.edges[edge_name].score.item() for edge_name in edge_names])
-        reference = values[0].expand_as(values)
-        torch.testing.assert_close(values, reference, rtol=1e-4, atol=1e-6)
+    tokens, attention_mask, _, _ = tokenize_plus(model, ["Grouped query attention"])
+    model_device = next(model.parameters()).device
+    tokens = tokens.to(model_device)
+    attention_mask = attention_mask.to(model_device)
+
+    shapes = {}
+
+    def capture(name):
+        def hook_fn(activations, hook):
+            shapes[name] = tuple(activations.shape)
+
+        return hook_fn
+
+    with model.hooks(
+        fwd_hooks=[
+            ("blocks.0.hook_k_input", capture("k")),
+            ("blocks.0.hook_v_input", capture("v")),
+        ]
+    ):
+        model(tokens, attention_mask=attention_mask)
+
+    assert shapes["k"][2] == model.cfg.n_heads
+    assert shapes["v"][2] == model.cfg.n_heads
 
 
 @pytest.mark.parametrize("case", select_cases(MATH_CASES), ids=lambda case: case.case_id)
@@ -331,72 +316,3 @@ def test_exact_patching_faithfulness(case):
     agreement = _sign_agreement(exact_scores, ig_scores)
     assert correlation > 0.8, f"Spearman correlation between exact patching and EAP-IG magnitudes is too low: {correlation}"
     assert agreement > 0.8, f"Exact patching and EAP-IG disagree on edge direction too often: {agreement}"
-
-
-@pytest.mark.slow
-@pytest.mark.xfail(
-    reason=(
-        "Current short-term GQA support duplicates grouped K/V heads into per-query-head graph slots. "
-        "Grouped exact patching is tracked here, but is not yet expected to align tightly with grouped EAP-IG "
-        "until the graph becomes GQA-aware."
-    ),
-    strict=True,
-)
-@pytest.mark.parametrize("case", select_cases(GROUPED_FAITHFULNESS_CASES), ids=lambda case: case.case_id)
-def test_gqa_grouped_exact_patching_matches_grouped_eap_ig(case):
-    require_enabled(
-        "EAP_RUN_MODEL_AUDIT_CERT",
-        "Set EAP_RUN_MODEL_AUDIT_CERT=1 to run model-audit mathematical validation tests.",
-    )
-    require_case_access(case)
-    device = resolve_device(case, default="cuda")
-
-    model = load_bridge_model(case, device=device)
-    validate_prepared_model(model, case)
-
-    dataloader = _single_batch()
-    ig_graph = Graph.from_model(model)
-    attribute(
-        model,
-        ig_graph,
-        dataloader,
-        metric,
-        method="EAP-IG-inputs",
-        ig_steps=12,
-        quiet=True,
-    )
-
-    candidate_groups = []
-    for group_key, edge_names in _grouped_kv_edge_groups(ig_graph).items():
-        group_values = [ig_graph.edges[edge_name].score.item() for edge_name in edge_names]
-        group_value = sum(group_values) / len(group_values)
-        if math.isfinite(group_value):
-            candidate_groups.append((abs(group_value), group_key, edge_names, group_value))
-
-    assert len(candidate_groups) >= 4, "Not enough grouped K/V edges were collected for the GQA faithfulness check."
-    candidate_groups.sort(reverse=True)
-    sampled_groups = candidate_groups[:12]
-
-    baseline = evaluate_baseline(model, dataloader, [metric], quiet=True).mean().item()
-    exact_scores = []
-    ig_scores = []
-    for _, _, edge_names, ig_value in sampled_groups:
-        exact_graph = Graph.from_model(model)
-        exact_graph.in_graph |= exact_graph.real_edge_mask
-        for edge_name in edge_names:
-            exact_graph.edges[edge_name].in_graph = False
-        exact_value = (
-            evaluate_graph(model, exact_graph, dataloader, metric, quiet=True, skip_clean=True).mean().item()
-            - baseline
-        )
-        if math.isfinite(exact_value):
-            exact_scores.append(exact_value)
-            ig_scores.append(ig_value)
-
-    assert len(ig_scores) >= 4, "Not enough grouped exact-patching scores were computed for the GQA faithfulness check."
-    exact_scores = torch.tensor(exact_scores)
-    ig_scores = torch.tensor(ig_scores)
-    correlation = _spearman_rank_correlation(exact_scores.abs(), ig_scores.abs())
-    agreement = _sign_agreement(exact_scores, ig_scores)
-    assert correlation > 0.8, f"Grouped exact patching and EAP-IG magnitudes disagree too much: {correlation}"
-    assert agreement > 0.8, f"Grouped exact patching and EAP-IG disagree on direction too often: {agreement}"

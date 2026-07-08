@@ -9,6 +9,7 @@ from eap.graph import Graph
 from eap.model_adapter import prepare_model_for_eap
 from eap.utils import make_hooks_and_matrices, tokenize_plus
 from conftest import hf_or_skip, tl_parity_device
+from parity_assertions import assert_strict_close
 
 
 pytestmark = [
@@ -21,6 +22,10 @@ pytestmark = [
 
 LLAMA_ROPE_BASE = 500000.0
 LLAMA_MODEL_NAME = "meta-llama/Llama-3.2-3B"
+LLAMA_HOOK_VALUE_ATOL = 2e-6
+LLAMA_CAPTURE_ATOL = 5e-6
+LLAMA_HOOK_GRAD_ATOL = 2e-6
+LLAMA_SCORE_ATOL = 2e-6
 
 
 def _llama_snapshot() -> str:
@@ -357,7 +362,12 @@ def test_tiny_llama_hook_values_match_between_hooked_transformer_and_bridge(
 
     assert hooked_values.keys() == bridge_values.keys()
     for name in _required_hook_names(hooked.cfg.n_layers):
-        torch.testing.assert_close(bridge_values[name], hooked_values[name], rtol=1e-5, atol=1e-5)
+        assert_strict_close(
+            bridge_values[name],
+            hooked_values[name],
+            atol=LLAMA_HOOK_VALUE_ATOL,
+            name=f"Tiny-Llama hook value {name}",
+        )
 
 
 def test_tiny_llama_capture_stage_matches_between_hooked_transformer_and_bridge(
@@ -381,13 +391,18 @@ def test_tiny_llama_capture_stage_matches_between_hooked_transformer_and_bridge(
         "input_activations_corrupted",
         "input_activations_clean",
     ):
-        torch.testing.assert_close(bridge_state[key], hooked_state[key], rtol=1e-5, atol=1e-5)
+        assert_strict_close(
+            bridge_state[key],
+            hooked_state[key],
+            atol=LLAMA_CAPTURE_ATOL,
+            name=f"Tiny-Llama capture state {key}",
+        )
 
-    torch.testing.assert_close(
+    assert_strict_close(
         bridge_state["clean_logits"],
         hooked_state["clean_logits"],
-        rtol=1e-5,
-        atol=1e-5,
+        atol=LLAMA_CAPTURE_ATOL,
+        name="Tiny-Llama capture clean logits",
     )
 
 
@@ -413,28 +428,13 @@ def test_tiny_llama_plain_backward_hook_gradients_match_between_hooked_transform
     )
     assert hooked_grads.keys() == bridge_grads.keys()
 
-    summary = _gradient_difference_summary(hooked_grads, bridge_grads)
-    mismatches = [
-        item
-        for item in summary
-        if not torch.allclose(
-            bridge_grads[item["name"]],
-            hooked_grads[item["name"]],
-            rtol=1e-5,
-            atol=1e-5,
+    for name in _required_hook_names(hooked.cfg.n_layers):
+        assert_strict_close(
+            bridge_grads[name],
+            hooked_grads[name],
+            atol=LLAMA_HOOK_GRAD_ATOL,
+            name=f"Tiny-Llama hook gradient {name}",
         )
-    ]
-    if mismatches:
-        lines = [
-            "Tiny-Llama plain backward hook parity mismatch on the clean EAP-IG path:",
-        ]
-        for item in mismatches:
-            lines.append(
-                f"{item['name']}: max_abs_diff={item['max_abs_diff']:.6g}, "
-                f"mean_abs_diff={item['mean_abs_diff']:.6g}, "
-                f"count_gt_1e-3={item['count_gt_threshold']}"
-            )
-        pytest.fail("\n".join(lines))
 
 
 def test_tiny_llama_bridge_does_not_leak_backward_hooks_after_plain_backward(
@@ -483,4 +483,9 @@ def test_tiny_llama_eap_ig_scores_match_between_hooked_transformer_and_bridge(
         quiet=True,
     )
 
-    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=1e-5, atol=1e-5)
+    assert_strict_close(
+        bridge_graph.scores,
+        hooked_graph.scores,
+        atol=LLAMA_SCORE_ATOL,
+        name="Tiny-Llama EAP-IG scores",
+    )

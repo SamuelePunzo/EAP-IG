@@ -7,6 +7,7 @@ from eap.attribute import attribute
 from eap.graph import Graph
 from eap.model_adapter import prepare_model_for_eap
 from conftest import hf_or_skip, tl_parity_device
+from parity_assertions import assert_strict_close
 
 
 pytestmark = [
@@ -28,6 +29,11 @@ REQUIRED_HOOK_NAMES = [
     "blocks.0.hook_mlp_out",
     "blocks.0.hook_resid_post",
 ]
+
+GPT2_LOGITS_ATOL = 2e-5
+GPT2_HOOK_VALUE_ATOL = 3e-5
+GPT2_HOOK_GRAD_ATOL = 2e-6
+GPT2_SCORE_ATOL = 5e-5
 
 
 def _load_hooked_transformer():
@@ -130,7 +136,12 @@ def test_hooked_transformer_and_bridge_logits_match_in_compatibility_mode():
         hooked_logits = hooked(tokens)
         bridge_logits = bridge(tokens)
 
-    torch.testing.assert_close(bridge_logits, hooked_logits, rtol=2e-5, atol=2e-5)
+    assert_strict_close(
+        bridge_logits,
+        hooked_logits,
+        atol=GPT2_LOGITS_ATOL,
+        name="GPT-2 logits",
+    )
 
 
 def test_required_eap_hook_shapes_match_between_hooked_transformer_and_bridge():
@@ -155,7 +166,12 @@ def test_required_eap_hook_values_match_between_hooked_transformer_and_bridge():
 
     assert hooked_values.keys() == bridge_values.keys()
     for name in REQUIRED_HOOK_NAMES:
-        torch.testing.assert_close(bridge_values[name], hooked_values[name], rtol=2e-5, atol=2e-5)
+        assert_strict_close(
+            bridge_values[name],
+            hooked_values[name],
+            atol=GPT2_HOOK_VALUE_ATOL,
+            name=f"GPT-2 hook value {name}",
+        )
 
 
 def test_required_eap_hook_gradients_match_between_hooked_transformer_and_bridge():
@@ -168,7 +184,12 @@ def test_required_eap_hook_gradients_match_between_hooked_transformer_and_bridge
 
     assert hooked_grads.keys() == bridge_grads.keys()
     for name in REQUIRED_HOOK_NAMES:
-        torch.testing.assert_close(bridge_grads[name], hooked_grads[name], rtol=2e-5, atol=2e-5)
+        assert_strict_close(
+            bridge_grads[name],
+            hooked_grads[name],
+            atol=GPT2_HOOK_GRAD_ATOL,
+            name=f"GPT-2 hook gradient {name}",
+        )
 
 
 def test_bridge_attribution_runs_with_legacy_compatible_hooks_by_default():
@@ -203,7 +224,12 @@ def test_tiny_eap_scores_match_between_hooked_transformer_and_bridge():
         quiet=True,
     )
 
-    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=2e-5, atol=2e-5)
+    assert_strict_close(
+        bridge_graph.scores,
+        hooked_graph.scores,
+        atol=GPT2_SCORE_ATOL,
+        name="GPT-2 EAP scores",
+    )
 
 
 def test_tiny_eap_ig_scores_match_between_hooked_transformer_and_bridge():
@@ -232,4 +258,9 @@ def test_tiny_eap_ig_scores_match_between_hooked_transformer_and_bridge():
         quiet=True,
     )
 
-    torch.testing.assert_close(bridge_graph.scores, hooked_graph.scores, rtol=2e-5, atol=2e-5)
+    assert_strict_close(
+        bridge_graph.scores,
+        hooked_graph.scores,
+        atol=GPT2_SCORE_ATOL,
+        name="GPT-2 EAP-IG scores",
+    )
