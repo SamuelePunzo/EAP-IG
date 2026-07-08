@@ -72,16 +72,33 @@ model = prepare_model_for_eap(bridge)
 graph = Graph.from_model(model)
 ```
 
-This mutates the bridge by calling `enable_compatibility_mode()` once by default, then enabling attention-result and split-Q/K/V hooks.
+This mutates the bridge by calling `enable_compatibility_mode()` once by default, then enabling attention-result, split-Q/K/V-input, and MLP-input hooks. For grouped-query attention models, it also materializes ungrouped K/V projections and sets `model.cfg.ungroup_grouped_query_attention = True` so EAP can build the legacy-equivalent head-level graph.
 
-Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The integration tests in this repo check parity against `HookedTransformer` for GPT-2, tiny Llama-family, tiny Qwen2-family, and tiny Gemma-family models.
+Bridge attribution/evaluation requires a TransformerLens build with legacy-compatible EAP hook semantics, such as `transformer-lens>=3.5.1`. Older bridge builds fail closed by default with an upgrade message.
+
+Bridge support requires a TransformerLens build with legacy-equivalent compatibility hooks and backward-hook cleanup for `TransformerBridge`. The opt-in integration tests in this repo check parity against `HookedTransformer` for GPT-2, tiny Llama-family, tiny Qwen2-family, and tiny Gemma-family models.
 
 TransformerBridge support is intentionally scoped to decoder-only transformer blocks with one attention and one MLP component per layer; SSM, multimodal, encoder-only, and encoder-decoder models are out of scope for v1.
+
+### Model audit test suite
+This repo includes a two-tier model audit suite:
+
+- **Smoke tier** (`tests/test_model_audit_smoke.py`): fast bridge-based compatibility checks across major model families.
+- **Certification tier** (`tests/test_model_audit_certification.py`): slower GPU-focused checks, with optional `HookedTransformer` vs `TransformerBridge` parity.
+
+Environment flags:
+
+- `EAP_RUN_MODEL_AUDIT_SMOKE=1`: enable smoke tier.
+- `EAP_RUN_MODEL_AUDIT_CERT=1`: enable certification tier.
+- `EAP_RUN_MODEL_AUDIT_PARITY=1`: enable certification parity tests (requires certification tier enabled).
+- `EAP_MODEL_AUDIT_FAMILIES=gpt2,qwen,...`: restrict audit runs to selected families/case ids.
+- `EAP_MODEL_AUDIT_DEVICE=cpu|cuda`: override default device selection.
+- `HF_TOKEN`/`HUGGING_FACE_HUB_TOKEN`: required for gated checkpoints.
 
 ## FAQs
 - **How is the computation graph drawn?**: In this library, graphs are defined as being collections of nodes and edges, where nodes are either the inputs, attention heads, MLPs, or logits. Edges connect nodes across layers, accounting for the fact that nodes can engage in cross-layer communication via the residual stream. Each MLP (and the logits) has 1 input, but each attention head has 3: the Q, K, and V input.
 - **Which models are compatible with this library?**: In general, this library works with autoregressive transformer LMs in TransformerLens. It's important that models use pre-LayerNorm, as post-LayerNorm means that the residual stream is no longer a sum of all previous components. The models I have used so far are: GPT-2, Pythia, Mistral, Qwen, OLMo, Llama, and Gemma (using a workaround / hack since there is a post layer-norm that doesn't totally destroy the residual stream.)
-- **What about models with Grouped Query Attention (GQA)?**: To work with these models, please ungroup the GQA by setting `model.cfg.ungroup_grouped_query_attention = True`; this will remove all of the efficiency benefits of GQA, but allow the model to be used with this library.
+- **What about models with Grouped Query Attention (GQA)?**: To work with these models, please ungroup the GQA by setting `model.cfg.ungroup_grouped_query_attention = True`; `prepare_model_for_eap(...)` now does this automatically for bridge models by materializing ungrouped K/V projections when the bridge exposes materializable linear K/V projections. This removes the efficiency benefits of GQA, but allows the model to be used with this library.
 - **What about zero and mean ablations?**: I think these are often best avoided, at least zero-ablation. But these are supported as well (with EAP / EAP-IG (activations)). Just set the `intervention` argument of `attribute` and `evaluate_graph` to `zero`, `mean`, or `mean-positional`; in the latter case, all inputs must have the same length / structure. You can specify the dataloader to take the mean over via the `intervention_dataloader` argument.
 
 ## More Info

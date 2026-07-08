@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
@@ -63,3 +64,15 @@ def tl_parity_device() -> str:
         if not torch.cuda.is_available():
             pytest.skip(f"EAP_TL_PARITY_DEVICE={device} requested but CUDA is unavailable.")
     return device
+
+
+@pytest.fixture(autouse=True)
+def cleanup_torch_state():
+    yield
+    gc.collect()
+    try:
+        import torch
+    except Exception:
+        return
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()

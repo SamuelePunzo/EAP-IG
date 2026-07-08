@@ -94,7 +94,7 @@ def make_hooks_and_matrices(model: HookedTransformer, graph: Graph, batch_size:i
         fwd_index = graph.forward_index(node)
         fwd_hooks_corrupted.append((node.out_hook, partial(activation_hook, fwd_index)))
         fwd_hooks_clean.append((node.out_hook, partial(activation_hook, fwd_index, add=False)))
-        bwd_hooks.append((node.in_hook, partial(gradient_hook, fwd_index, fwd_index)))
+        bwd_hooks.append((node.out_hook, partial(gradient_hook, fwd_index, fwd_index)))
 
     return (fwd_hooks_corrupted, fwd_hooks_clean, bwd_hooks), activation_difference
 
@@ -147,9 +147,9 @@ def get_scores_eap(model: HookedTransformer, graph: Graph, dataloader:DataLoader
         Tensor: a [src_nodes, dst_nodes] tensor of scores for each edge
     """
     if neuron:
-        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)
     else:
-        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)
 
     if 'mean' in intervention:
         assert intervention_dataloader is not None, "Intervention dataloader must be provided for mean interventions"
@@ -207,9 +207,9 @@ def get_scores_eap_ig(model: HookedTransformer, graph: Graph, dataloader: DataLo
         Tensor: a [src_nodes, dst_nodes] tensor of scores for each edge
     """
     if neuron:
-        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)
     else:
-        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)
     
     total_items = 0
     dataloader = dataloader if quiet else tqdm(dataloader)
@@ -269,9 +269,9 @@ def get_scores_ig_activations(model: HookedTransformer, graph: Graph, dataloader
             means = means.unsqueeze(0)
 
     if neuron:
-        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)
     else:
-        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)
     
     total_items = 0
     dataloader = dataloader if quiet else tqdm(dataloader)
@@ -347,9 +347,9 @@ def get_scores_clean_corrupted(model: HookedTransformer, graph: Graph, dataloade
         Tensor: a [src_nodes, dst_nodes] tensor of scores for each edge
     """
     if neuron:
-        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward, graph.cfg.d_model), device=get_model_device(model), dtype=model.cfg.dtype)
     else:
-        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)    
+        scores = torch.zeros((graph.n_forward), device=get_model_device(model), dtype=model.cfg.dtype)
     
     total_items = 0
     dataloader = dataloader if quiet else tqdm(dataloader)
